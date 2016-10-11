@@ -15,6 +15,13 @@ function array_cstring_to_string(s::Array{UInt8})
 end
 
 
+function handle_return(code::Int32)
+  if code < -1
+    error("Exodus error: \"$(ex_get_error())\"")
+  end
+end
+
+
 # Constants defined in exodusII.h
 
 EX_API_VERS = 6.02
@@ -121,25 +128,21 @@ function ex_open(path::String)::Int32
   file_float_size = Ref{Int32}(8) # sizeof(double)
   file_ver_num = Ref{Float32}(0)  # is written to
 
-  val = ccall((:ex_open_int,"libexoIIv2"),
+  ret = ccall((:ex_open_int,"libexoIIv2"),
               Int32,
               (Cstring,Int32,Ref{Int32},Ref{Int32},Ref{Float32},Int32),
               path,EX_READ,my_float_size,file_float_size,file_ver_num,EX_API_VERS_NODOT)
-  if val == -1
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
-  return val
+  handle_return(ret)
+  return ret
 end
 
 
 function ex_close(file_id::Int32)
-  val = ccall((:ex_close,"libexoIIv2"),
+  ret = ccall((:ex_close,"libexoIIv2"),
               Int32,
               (Int32,),
               file_id)
-  if val<0
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
 end
 
 
@@ -151,13 +154,11 @@ function ex_get_init(file_id::Int32)::exodus_info
   num_elem_blk = Ref{Int32}(0)
   num_node_sets = Ref{Int32}(0)
   num_side_sets = Ref{Int32}(0)
-  val = ccall((:ex_get_init,"libexoIIv2"),
+  ret = ccall((:ex_get_init,"libexoIIv2"),
               Int32,
               (Int32,Ref{UInt8},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32}),
               file_id,title,num_dim,num_nodes,num_elem,num_elem_blk,num_node_sets,num_side_sets)
-  if val == -1
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
   return exodus_info(num_dim[],num_nodes[],num_elem[],num_elem_blk[],num_node_sets[],num_side_sets[])
 end
 
@@ -166,13 +167,11 @@ function ex_get_num_times(file_id::Int32)::Int32
   ret_int = Ref{Int32}(0)
   ret_flt = Ref{Float64}(0)
   ret_chr = Ref{UInt8}(0)
-  val = ccall((:ex_inquire,"libexoIIv2"),
+  ret = ccall((:ex_inquire,"libexoIIv2"),
               Int32,
               (Int32,Int32,Ref{Int32},Ref{Float64},Ref{UInt8}),
               file_id,EX_INQ_TIME,ret_int,ret_flt,ret_chr)
-  if val == -1
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
   return ret_int[]
 end
 
@@ -180,26 +179,22 @@ end
 function ex_get_var_names(file_id::Int32,var_type::String,num_vars::Int32)
   names = Array{Array{UInt8}}([Array{UInt8}(EX_MAX_STRING_LENGTH) for i in 1:num_vars])
   msg = Ref{Ptr{UInt8}}(0)
-  val = ccall((:ex_get_var_names,"libexoIIv2"),
+  ret = ccall((:ex_get_var_names,"libexoIIv2"),
               Int32,
               (Int32,Cstring,Int32,Ref{Ptr{UInt8}}),
               file_id,var_type,num_vars,names)
-  if val<0
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
   return map(array_cstring_to_string,names)
 end
 
 
 function ex_get_var_param(file_id::Int32,var_type::String)
   num = Ref{Int32}(0)
-  val = ccall((:ex_get_var_param,"libexoIIv2"),
+  ret = ccall((:ex_get_var_param,"libexoIIv2"),
               Int32,
               (Int32,Cstring,Ref{Int32}),
               file_id,var_type,num)
-  if val<0
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
   return num[]
 end
 
@@ -221,13 +216,11 @@ function ex_get_node_var_vals(file_id::Int32,name::String,time_step::Integer)
   end
   finfo = ex_get_init(file_id)
   values = Array{Float64}(finfo.num_nodes)
-  val = ccall((:ex_get_nodal_var,"libexoIIv2"),
+  ret = ccall((:ex_get_nodal_var,"libexoIIv2"),
               Int32,
               (Int32,Int32,Int32,Int32,Ref{Float64}),
               file_id,time_step,var_index,finfo.num_nodes,values)
-  if val<0
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
 
   return values
 end
@@ -241,13 +234,11 @@ function ex_get_elem_var_vals(file_id::Int32,name::String,block_id::Integer,time
   finfo = ex_get_init(file_id)
   values = Array{Float64}(finfo.num_elem)
 
-  val = ccall((:ex_get_elem_var,"libexoIIv2"),
+  ret = ccall((:ex_get_elem_var,"libexoIIv2"),
               Int32,
               (Int32,Int32,Int32,Int32,Int32,Ref{Float64}),
               file_id,time_step,var_index,block_id,finfo.num_elem,values)
-  if val<0
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
   return values
 end 
 
@@ -255,13 +246,11 @@ end
 function ex_get_elem_block_ids(file_id::Int32)
   finfo = ex_get_init(file_id)
   block_ids = Array{Int32}(finfo.num_elem_blk)
-  val = ccall((:ex_get_elem_blk_ids,"libexoIIv2"),
+  ret = ccall((:ex_get_elem_blk_ids,"libexoIIv2"),
               Int32,
               (Int32,Ref{Int32}),
               file_id,block_ids)
-  if val<0
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
   return block_ids
 end
 
@@ -271,13 +260,11 @@ function ex_get_elem_block(file_id::Int32,block_id::Integer)
   num_el = Ref{Int32}(0)
   num_nodes_per_elem = Ref{Int32}(0)
   num_attr = Ref{Int32}(0)
-  val = ccall((:ex_get_elem_block,"libexoIIv2"),
+  ret = ccall((:ex_get_elem_block,"libexoIIv2"),
               Int32,
               (Int32,Int32,Ref{UInt8},Ref{Int32},Ref{Int32},Ref{Int32}),
               file_id,block_id,elem_type,num_el,num_nodes_per_elem,num_attr)
-  if val<0
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
   return array_cstring_to_string(elem_type), num_el[], num_nodes_per_elem[]
 end
 
@@ -286,13 +273,11 @@ function ex_get_elem_connections(file_id::Int32,block_id::Integer)
   _,num_elem,nodes_per_el = ex_get_elem_block(file_id,block_id)
 
   raw_connect = Array{Int32}(nodes_per_el*num_elem)
-  val = ccall((:ex_get_elem_conn,"libexoIIv2"),
+  ret = ccall((:ex_get_elem_conn,"libexoIIv2"),
               Int32,
               (Int32,Int32,Ref{Int32}),
               file_id,block_id,raw_connect)
-  if val<0
-    error("Exodus error: \"$(ex_get_error())\"")
-  end
+  handle_return(ret)
 
   return reshape(raw_connect,(nodes_per_el,num_elem))
 end

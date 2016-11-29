@@ -1,6 +1,8 @@
 module ExodusII
 
 
+EntIDType = Int64
+
 # Utility functions
 
 function array_cstring_to_string(s::Array{UInt8})
@@ -12,8 +14,18 @@ function array_cstring_to_string(s::Array{UInt8})
 end
 
 
-function handle_return(code::Int32)
-  if code < -1
+function handle_return_no_warn(code::Cint)
+  if code <= -1
+    error("Exodus error: \"$(ex_get_error())\"")
+  end
+end
+
+
+function handle_return(code::Cint)
+  if code >= 1
+    warn("Exodus warning: \"$(ex_get_error())\"")
+  end
+  if code <= -1
     error("Exodus error: \"$(ex_get_error())\"")
   end
 end
@@ -22,9 +34,9 @@ end
 # Constants defined in exodusII.h
 
 EX_API_VERS = 6.02
-EX_API_VERS_NODOT = Int32(602)
-EX_READ = 0x0000
-
+EX_API_VERS_NODOT = Cint(602)
+EX_READ  = 0x0000
+EX_WRITE = 0x0001
 
 EX_INQ_FILE_TYPE       =  1 # inquire EXODUS II file type
 EX_INQ_API_VERS        =  2 # inquire API version number 
@@ -100,18 +112,18 @@ julia_float_size = 8
 function ex_get_error()
   msg = Ref{Ptr{UInt8}}(0)
   func = Ref{Ptr{UInt8}}(0)
-  code = Ref{Int32}(0)
+  code = Ref{Cint}(0)
   
   ccall((:ex_get_err,"libexoIIv2"),
         Void,
-        (Ref{Ptr{UInt8}},Ref{Ptr{UInt8}},Ref{Int32}),
+        (Ref{Ptr{UInt8}},Ref{Ptr{UInt8}},Ref{Cint}),
         msg, func, code)
   return unsafe_string(msg[])
 end
 
 
 type ex_file
-  fid::Int32
+  fid::Cint
   title::String
   num_dim::Int32
   num_nodes::Int32
@@ -123,15 +135,21 @@ end
 
 
 function ex_open(path::String)::ex_file
-  my_float_size = Ref{Int32}(julia_float_size)
-  file_float_size = Ref{Int32}(8) # sizeof(double)
+  my_float_size = Ref{Cint}(julia_float_size)
+  file_float_size = Ref{Cint}(8) # sizeof(double)
   file_ver_num = Ref{Float32}(0)  # is written to
 
   fid = ccall((:ex_open_int,"libexoIIv2"),
-              Int32,
-              (Cstring,Int32,Ref{Int32},Ref{Int32},Ref{Float32},Int32),
+              Cint,
+              (Cstring,Cint,Ref{Cint},Ref{Cint},Ref{Float32},Cint),
               path,EX_READ,my_float_size,file_float_size,file_ver_num,EX_API_VERS_NODOT)
-  handle_return(fid)
+  handle_return_no_warn(fid)
+  
+  ret = ccall((:ex_int64_status,"libexoIIv2"),Cint,(Cint,),fid)
+  if ret & (EX_ALL_INT64_DB|EX_ALL_INT64_API) > 0
+    ret = ccall((:ex_close,"libexoIIv2"),Cint,(Cint,),fid)
+    error("Julia exodus interface cannot handle int64 bulk data")
+  end
 
   title = Array{UInt8}(EX_MAX_LINE_LENGTH+1)
   num_dim = Ref{Int32}(0)
@@ -141,8 +159,8 @@ function ex_open(path::String)::ex_file
   num_node_sets = Ref{Int32}(0)
   num_side_sets = Ref{Int32}(0)
   ret = ccall((:ex_get_init,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{UInt8},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32}),
+              Cint,
+              (Cint,Ref{UInt8},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32},Ref{Int32}),
               fid,title,num_dim,num_nodes,num_elem,num_elem_blk,num_node_sets,num_side_sets)
   handle_return(ret)
 
@@ -158,10 +176,7 @@ end
 
 
 function ex_close(file::ex_file)
-  ret = ccall((:ex_close,"libexoIIv2"),
-              Int32,
-              (Int32,),
-              file.fid)
+  ret = ccall((:ex_close,"libexoIIv2"),Cint,(Cint,),file.fid)
   handle_return(ret)
 end
 
@@ -171,8 +186,8 @@ function ex_get_coord(file::ex_file)
   Y = Array{Float64}(file.num_nodes)
   Z = Array{Float64}(file.num_nodes)
   ret = ccall((:ex_get_coord,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{Float64},Ref{Float64},Ref{Float64}),
+              Cint,
+              (Cint,Ptr{Float64},Ptr{Float64},Ptr{Float64}),
               file.fid,X,Y,Z)
   handle_return(ret)
   if file.num_dim == 1
@@ -190,8 +205,8 @@ end
 function ex_get_coord_names(file::ex_file)
   raw_names = Array{Array{UInt8}}([Array{UInt8}(EX_MAX_STRING_LENGTH+1) for i in 1:file.num_dim])
   ret = ccall((:ex_get_coord_names,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{Ptr{UInt8}}),
+              Cint,
+              (Cint,Ref{Ptr{UInt8}}),
               file.fid,raw_names)
   handle_return(ret)
   return map(array_cstring_to_string,raw_names)
@@ -201,8 +216,8 @@ end
 function ex_get_node_num_map(file::ex_file)
   node_map = Array{Int32}(file.num_nodes)
   ret = ccall((:ex_get_node_num_map,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{Int32}),
+              Cint,
+              (Cint,Ref{Int32}),
               file.fid,node_map)
   handle_return(ret)
   return node_map
@@ -212,8 +227,8 @@ end
 function ex_get_elem_num_map(file::ex_file)
   elem_map = Array{Int32}(file.num_elem)
   ret = ccall((:ex_get_elem_num_map,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{Int32}),
+              Cint,
+              (Cint,Ref{Int32}),
               file.fid,elem_map)
   handle_return(ret)
   return elem_map
@@ -222,12 +237,12 @@ end
 
 function ex_get_elem_block(file::ex_file,block_id::Integer)
   elem_type = Array{UInt8}(EX_MAX_STRING_LENGTH+1)
-  num_el = Ref{Int32}(0)
+  num_el             = Ref{Int32}(0)
   num_nodes_per_elem = Ref{Int32}(0)
-  num_attr = Ref{Int32}(0)
+  num_attr           = Ref{Int32}(0)
   ret = ccall((:ex_get_elem_block,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Ref{UInt8},Ref{Int32},Ref{Int32},Ref{Int32}),
+              Cint,
+              (Cint,EntIDType,Ref{UInt8},Ref{Int32},Ref{Int32},Ref{Int32}),
               file.fid,block_id,elem_type,num_el,num_nodes_per_elem,num_attr)
   handle_return(ret)
   return array_cstring_to_string(elem_type), num_el[], num_nodes_per_elem[]
@@ -237,8 +252,8 @@ end
 function ex_get_elem_block_ids(file::ex_file)
   block_ids = Array{Int32}(file.num_elem_blk)
   ret = ccall((:ex_get_elem_blk_ids,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{Int32}),
+              Cint,
+              (Cint,Ref{Int32}),
               file.fid,block_ids)
   handle_return(ret)
   return block_ids
@@ -250,8 +265,8 @@ function ex_get_elem_connections(file::ex_file,block_id::Integer)
 
   raw_connect = Array{Int32}(nodes_per_el*num_elem)
   ret = ccall((:ex_get_elem_conn,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Ref{Int32}),
+              Cint,
+              (Cint,EntIDType,Ref{Int32}),
               file.fid,block_id,raw_connect)
   handle_return(ret)
 
@@ -259,24 +274,24 @@ function ex_get_elem_connections(file::ex_file,block_id::Integer)
 end
 
 
-function ex_get_node_set_param(file::ex_file,node_set_id::Integer)
+function ex_get_node_set_param{T<:Integer}(file::ex_file,node_set_id::T)
   num_nodes_in_set = Ref{Int32}(0)
   num_dist_in_set = Ref{Int32}(0)
   ret = ccall((:ex_get_node_set_param,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Ref{Int32},Ref{Int32}),
+              Cint,
+              (Cint,EntIDType,Ref{Int32},Ref{Int32}),
               file.fid,node_set_id,num_nodes_in_set,num_dist_in_set)
   handle_return(ret)
   return num_nodes_in_set[],num_dist_in_set[]
 end
 
 
-function ex_get_node_set(file::ex_file,node_set_id::Integer)
+function ex_get_node_set{T<:Integer}(file::ex_file,node_set_id::T)
   num_nodes,_ = ex_get_node_set_param(file,node_set_id)
   node_set = Array{Int32}(num_nodes)
   ret = ccall((:ex_get_node_set,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Ref{Int32}),
+              Cint,
+              (Cint,EntIDType,Ref{Int32}),
               file.fid,node_set_id,node_set)
   handle_return(ret)
   return node_set
@@ -286,66 +301,91 @@ end
 function ex_get_node_set_ids(file::ex_file)
   node_set_ids = Array{Int32}(file.num_node_sets)
   ret = ccall((:ex_get_node_set_ids,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{Int32}),
+              Cint,
+              (Cint,Ref{Int32}),
               file.fid,node_set_ids)
   handle_return(ret)
   return node_set_ids
 end
 
 
-function ex_get_side_set_param(file::ex_file,side_set_id)
-  num_in_set = Ref{Int32}(0)
-  num_dist_fact = Ref{Int32}(0)
-  ret = ccall((:ex_get_side_set_param,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Ref{Int32},Ref{Int32}),
-              file.fid,side_set_id,num_in_set,num_dist_fact)
+
+function ex_get_elem_blk_prop_names(file::ex_file)
+  ret_int = Ref{Int32}(0)
+  ret_flt = Ref{Float64}(0)
+  ret_chr = Ref{UInt8}(0)
+  ret = ccall((:ex_inquire,"libexoIIv2"),
+              Cint,
+              (Cint,Cint,Ref{Int32},Ref{Float64},Ref{UInt8}),
+              file.fid,EX_INQ_EB_PROP,ret_int,ret_flt,ret_chr)
   handle_return(ret)
-  return num_in_set[],num_dist_fact[]
+  num_prop = ret_int[]
+  raw_names = Array{Array{UInt8}}([Array{UInt8}(EX_MAX_STRING_LENGTH) for i in num_prop])
+  ret = ccall((:ex_get_prop_names,"libexoIIv2"),
+              Cint,
+              (Cint,Cint,Ref{Ptr{UInt8}}),
+              file.fid,EX_ELEM_BLOCK,raw_names)
+  handle_return(ret)
+  return map(array_cstring_to_string,raw_names)
 end
 
 
-function ex_get_side_set(file::ex_file,side_set_id)
-  num_sides,_ = ex_get_side_set_param(file,side_set_id)
-  side_set = Array{Int32}(num_sides)
-  ret = ccall((:ex_get_side_set,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Ref{Int32}),
-              file.fid,side_set_id,side_set)
+function ex_get_node_set_prop_names(file::ex_file)
+  ret_int = Ref{Int32}(0)
+  ret_flt = Ref{Float64}(0)
+  ret_chr = Ref{UInt8}(0)
+  ret = ccall((:ex_inquire,"libexoIIv2"),
+              Cint,
+              (Cint,Cint,Ref{Int32},Ref{Float64},Ref{UInt8}),
+              file.fid,EX_INQ_NS_PROP,ret_int,ret_flt,ret_chr)
   handle_return(ret)
-  return side_set
+  num_prop = ret_int[]
+  raw_names = Array{Array{UInt8}}([Array{UInt8}(EX_MAX_STRING_LENGTH) for i in num_prop])
+  ret = ccall((:ex_get_prop_names,"libexoIIv2"),
+              Cint,
+              (Cint,Cint,Ref{Ptr{UInt8}}),
+              file.fid,EX_NODE_SET,raw_names)
+  handle_return(ret)
+  return map(array_cstring_to_string,raw_names)
 end
 
 
-function ex_get_side_set_ids(file::ex_file)
-  side_set_ids = Array{Int32}(file.num_side_sets)
-  ret = ccall((:ex_get_side_set_ids,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{Int32}),
-              file.fid,side_set_ids)
+function ex_get_side_set_prop_names(file::ex_file)
+  ret_int = Ref{Int32}(0)
+  ret_flt = Ref{Float64}(0)
+  ret_chr = Ref{UInt8}(0)
+  ret = ccall((:ex_inquire,"libexoIIv2"),
+              Cint,
+              (Cint,Cint,Ref{Int32},Ref{Float64},Ref{UInt8}),
+              file.fid,EX_INQ_SS_PROP,ret_int,ret_flt,ret_chr)
   handle_return(ret)
-  return side_set_ids
+  num_prop = ret_int[]
+  raw_names = Array{Array{UInt8}}([Array{UInt8}(EX_MAX_STRING_LENGTH) for i in num_prop])
+  ret = ccall((:ex_get_prop_names,"libexoIIv2"),
+              Cint,
+              (Cint,Cint,Ref{Ptr{UInt8}}),
+              file.fid,EX_SIDE_SET,raw_names)
+  handle_return(ret)
+  return map(array_cstring_to_string,raw_names)
 end
-
 
 
 function ex_get_var_param(file::ex_file,var_type::String)
-  num = Ref{Int32}(0)
+  num = Ref{Cint}(0)
   ret = ccall((:ex_get_var_param,"libexoIIv2"),
-              Int32,
-              (Int32,Cstring,Ref{Int32}),
+              Cint,
+              (Cint,Cstring,Ref{Cint}),
               file.fid,var_type,num)
   handle_return(ret)
   return num[]
 end
 
 
-function ex_get_var_names(file::ex_file,var_type::String,num_vars::Int32)
+function ex_get_var_names(file::ex_file,var_type::String,num_vars::Cint)
   names = Array{Array{UInt8}}([Array{UInt8}(EX_MAX_STRING_LENGTH+1) for i in 1:num_vars])
   ret = ccall((:ex_get_var_names,"libexoIIv2"),
-              Int32,
-              (Int32,Cstring,Int32,Ref{Ptr{UInt8}}),
+              Cint,
+              (Cint,Cstring,Cint,Ref{Ptr{UInt8}}),
               file.fid,var_type,num_vars,names)
   handle_return(ret)
   return map(array_cstring_to_string,names)
@@ -367,8 +407,8 @@ function ex_get_num_times(file::ex_file)::Int32
   ret_flt = Ref{Float64}(0)
   ret_chr = Ref{UInt8}(0)
   ret = ccall((:ex_inquire,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Ref{Int32},Ref{Float64},Ref{UInt8}),
+              Cint,
+              (Cint,Int32,Ref{Int32},Ref{Float64},Ref{UInt8}),
               file.fid,EX_INQ_TIME,ret_int,ret_flt,ret_chr)
   handle_return(ret)
   return ret_int[]
@@ -378,8 +418,8 @@ end
 function ex_get_time(file::ex_file,time_index::Integer)
   time = Ref{Float64}(0)
   ret = ccall((:ex_get_time,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Ref{Float64}),
+              Cint,
+              (Cint,Cint,Ref{Float64}),
               file.fid,time_index,time)
   handle_return(ret)
   return time[]
@@ -389,8 +429,8 @@ end
 function ex_get_all_times(file::ex_file)
   times = Array{Float64}(ex_get_num_times(file))
   ret = ccall((:ex_get_all_times,"libexoIIv2"),
-              Int32,
-              (Int32,Ref{Float64}),
+              Cint,
+              (Cint,Ref{Float64}),
               file.fid,times)
   handle_return(ret)
   return times
@@ -399,10 +439,10 @@ end
 
 function ex_get_elem_var_tab(file::ex_file)
   num_elem_vars = ex_get_var_param(file,"e")
-  elem_var_table = Array{Int32}(file.num_elem_blk*num_elem_vars)
+  elem_var_table = Array{Cint}(file.num_elem_blk*num_elem_vars)
   ret = ccall((:ex_get_elem_var_tab,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Int32,Ref{Int32}),
+              Cint,
+              (Cint,Cint,Cint,Ref{Cint}),
               file.fid,file.num_elem_blk,num_elem_vars,elem_var_table)
   handle_return(ret)
   return reshape(elem_var_table,(num_elem_vars,file.num_elem_blk))
@@ -416,8 +456,8 @@ function ex_get_node_var_vals(file::ex_file,name::String,time_step::Integer)
   end
   values = Array{Float64}(file.num_nodes)
   ret = ccall((:ex_get_nodal_var,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Int32,Int32,Ref{Float64}),
+              Cint,
+              (Cint,Cint,Cint,Int64,Ref{Float64}),
               file.fid,time_step,var_index,file.num_nodes,values)
   handle_return(ret)
 
@@ -434,8 +474,8 @@ function ex_get_elem_var_vals(file::ex_file,time_step::Integer,name::String,bloc
   values = Array{Float64}(num_elem_in_blk)
 
   ret = ccall((:ex_get_elem_var,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Int32,Int32,Int32,Ref{Float64}),
+              Cint,
+              (Cint,Cint,Cint,EntIDType,Int64,Ref{Float64}),
               file.fid,time_step,var_index,block_id,num_elem_in_blk,values)
   handle_return(ret)
   return values
@@ -446,8 +486,8 @@ function ex_get_elem_var_vals(file::ex_file,time_step::Integer,elem_var_index,bl
   num_elem_in_blk = ex_get_elem_block(file,block_id)[2]
   values = Array{Float64}(num_elem_in_blk)
   ret = ccall((:ex_get_elem_var,"libexoIIv2"),
-              Int32,
-              (Int32,Int32,Int32,Int32,Int32,Ref{Float64}),
+              Cint,
+              (Cint,Cint,Cint,EntIDType,Int64,Ref{Float64}),
               file.fid,time_step,elem_var_index,block_id,num_elem_in_blk,values)
   handle_return(ret)
   return values

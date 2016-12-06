@@ -117,7 +117,7 @@ EX_INQ_FULL_GROUP_NAME = 58 # inquire full "/"-separated path name of this (exoi
 EX_INQ_INVALID         = -1
 
 
-
+# enum ex_entity_type {
 EX_NODAL       = 14 # nodal "block" for variables
 EX_NODE_BLOCK  = 14 # alias for EX_NODAL         
 EX_NODE_SET    =  2 # node set property code     
@@ -138,7 +138,7 @@ EX_FACE_MAP    = 12 # face map property code
 EX_GLOBAL      = 13 # global "block" for variables
 EX_COORDINATE  = 15 # kluge so some internal wrapper functions work 
 EX_INVALID     = -1             
-  
+# }
 
 
 # These lengths do not include space for the terminating nul. Following the
@@ -319,6 +319,29 @@ function ex_put_coord_names(file::ex_file,names::Array{String})
               (Cint,Ptr{Cstring}),
               file.fid,names)
   handle_return(ret)
+end
+
+
+function ex_put_name(file::ex_file,entity_type,entity_id,name)
+  if length(name) > EX_MAX_STRING_LENGTH
+    error("name too long, must be at most $(EX_MAX_STRING_LENGTH) chars")
+  end
+  ret = ccall((:ex_put_name,"libexoIIv2"),
+              Cint,
+              (Cint,Cint,EntIDType,Cstring),
+              file.fid,entity_type,entity_id,name)
+  handle_return(ret)
+end
+
+
+function ex_get_name(file::ex_file,entity_type,entity_id)
+  name = Array{UInt8}(EX_MAX_STRING_LENGTH+1)
+  ret = ccall((:ex_get_name,"libexoIIv2"),
+              Cint,
+              (Cint,Cint,EntIDType,Ptr{UInt8}),
+              file.fid,entity_type,entity_id,name)
+  handle_return(ret)
+  return array_cstring_to_string(name)
 end
 
 

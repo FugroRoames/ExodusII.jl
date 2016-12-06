@@ -52,11 +52,13 @@ using Base.Test
 
   # Set node sets
   set_id1 = 4123
+  set_name1 = "Node Set 1"
   set_num_node1 = 2
   nd_dist1 = 0
   ExodusII.ex_put_node_set_param(f,set_id1,set_num_node1,nd_dist1)
   node_set1 = [5,9]
   ExodusII.ex_put_node_set(f,set_id1,node_set1)
+  ExodusII.ex_put_name(f,ExodusII.EX_NODE_SET,set_id1,set_name1)
 
   set_id2 = 914
   set_num_node2 = 1
@@ -144,6 +146,8 @@ using Base.Test
   @test read_num_dist == nd_dist1
   read_ns = ExodusII.ex_get_node_set(f,set_id1)
   @test read_ns == node_set1
+  read_ns_name = ExodusII.ex_get_name(f,ExodusII.EX_NODE_SET,set_id1)
+  @test read_ns_name == set_name1
 
   read_num_node,read_num_dist = ExodusII.ex_get_node_set_param(f,set_id2)
   @test read_num_node == set_num_node2

@@ -61,11 +61,14 @@ using Base.Test
   ExodusII.ex_put_name(f,ExodusII.EX_NODE_SET,set_id1,set_name1)
 
   set_id2 = 914
+  set_name2 = "Node Set 2"
   set_num_node2 = 1
   nd_dist2 = 0
   ExodusII.ex_put_node_set_param(f,set_id2,set_num_node2)
   node_set2 = [10]
   ExodusII.ex_put_node_set(f,set_id2,node_set2)
+  ExodusII.ex_put_name(f,ExodusII.EX_NODE_SET,set_id2,set_name2)
+
 
   # Set variables
   nvar_names = ["Nvar1","Nvar2","Nvar3"]
@@ -154,6 +157,8 @@ using Base.Test
   @test read_num_dist == nd_dist2
   read_ns = ExodusII.ex_get_node_set(f,set_id2)
   @test read_ns == node_set2
+  read_ns_name = ExodusII.ex_get_name(f,ExodusII.EX_NODE_SET,set_id2)
+  @test read_ns_name == set_name2
 
   # Check variables
   read_nvar_names = ExodusII.ex_get_nodal_var_names(f)
